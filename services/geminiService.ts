@@ -1,7 +1,7 @@
 import { GoogleGenAI, Modality, GenerateContentResponse, Type } from "@google/genai";
 import { ImagePart, LatentSpaceResponse } from '../types';
 import { SSPP_FRAMEWORK_PROMPT } from '../prompts/sspp';
-import { LATENT_SPACE_EXPLORER_PROMPT } from "../prompts/latentSpace";
+import { getLatentSpaceExplorerPrompt } from "../prompts/latentSpace";
 
 const API_KEY = process.env.API_KEY;
 
@@ -44,13 +44,14 @@ export const analyzeImageWithSSPP = async (imagePart: ImagePart): Promise<string
     }
 };
 
-export const exploreLatentSpace = async (imagePart: ImagePart): Promise<LatentSpaceResponse> => {
+export const exploreLatentSpace = async (imagePart: ImagePart, numIdeas: number = 4): Promise<LatentSpaceResponse> => {
     try {
+      const prompt = getLatentSpaceExplorerPrompt(numIdeas);
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-pro',
         contents: {
           parts: [
-            { text: LATENT_SPACE_EXPLORER_PROMPT },
+            { text: prompt },
             imagePart,
           ]
         },

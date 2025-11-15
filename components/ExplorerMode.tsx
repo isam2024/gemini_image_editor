@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ExplorerNode, LatentSpaceIdea } from '../types';
-import { LoadingSpinner, MagicIcon, SparklesIcon, SaveIcon, CheckboxUncheckedIcon, CheckboxCheckedIcon } from './icons';
+import { LoadingSpinner, MagicIcon, SparklesIcon, SaveIcon, CheckboxUncheckedIcon, CheckboxCheckedIcon, SitemapIcon, RefreshIcon, RobotIcon, ChevronDownIcon, ChevronUpIcon } from './icons';
+import { ExplorerTreeView } from './ExplorerTreeView';
 
 // Add declaration for JSZip from CDN
 declare const JSZip: any;
@@ -9,8 +10,9 @@ interface ExplorerModeProps {
   nodes: Record<string, ExplorerNode>;
   currentNodeId: string | null;
   onNavigate: (nodeId: string) => void;
-  onExplore: (nodeId: string) => void;
+  onExplore: (nodeId: string, numIdeas: number) => void;
   onGenerate: (parentId: string, idea: LatentSpaceIdea, ideaIndex: number) => void;
+  onAutoExplore: (startNodeId: string, depth: number, numIdeas: number) => Promise<void>;
   onExit: () => void;
   error: string | null;
   clearError: () => void;
@@ -54,6 +56,7 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
   onNavigate,
   onExplore,
   onGenerate,
+  onAutoExplore,
   onExit,
   error,
   clearError
@@ -61,6 +64,13 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
   const [selectedIdeas, setSelectedIdeas] = useState<Set<number>>(new Set());
   const [selectedNodesForSave, setSelectedNodesForSave] = useState<Set<string>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
+  const [isTreeViewOpen, setIsTreeViewOpen] = useState(false);
+  
+  // Advanced mode state
+  const [isAdvanced, setIsAdvanced] = useState(false);
+  const [numIdeas, setNumIdeas] = useState(5);
+  const [autoExploreDepth, setAutoExploreDepth] = useState(3);
+  const [isAutoExploring, setIsAutoExploring] = useState(false);
 
   if (!currentNodeId || !nodes[currentNodeId]) {
     return (
@@ -74,7 +84,7 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
   const currentNode = nodes[currentNodeId];
   const parentNode = currentNode.parentId ? nodes[currentNode.parentId] : null;
   const childNodes = currentNode.childrenIds.map(id => nodes[id]);
-  const isAnyGenerating = currentNode.generatingIdeaIndices.length > 0;
+  const isAnyGenerating = currentNode.generatingIdeaIndices.length > 0 || isAutoExploring;
 
   const handleToggleIdeaSelection = (index: number) => {
     setSelectedIdeas(prev => {
@@ -172,6 +182,21 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
     }
   };
 
+  const handleNavigateFromTree = (nodeId: string) => {
+      onNavigate(nodeId);
+      setIsTreeViewOpen(false);
+  };
+
+  const handleStartAutoExplore = async () => {
+    if (isAnyGenerating) return;
+    setIsAutoExploring(true);
+    try {
+      await onAutoExplore(currentNodeId, autoExploreDepth, numIdeas);
+    } finally {
+      setIsAutoExploring(false);
+    }
+  };
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col p-4 md:p-8">
@@ -181,16 +206,10 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
           Latent Space Explorer
         </h1>
         <div className="flex items-center gap-2 md:gap-4">
-            <button onClick={handleSelectAllForSave} className="text-sm font-semibold text-gray-300 hover:text-white">Select All Visible</button>
-            {selectedNodesForSave.size > 0 && (
-            <>
-                <button onClick={handleDeselectAllForSave} className="text-sm text-gray-400 hover:text-white">Deselect All</button>
-                <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg font-semibold text-sm disabled:bg-green-800 disabled:cursor-not-allowed">
-                {isSaving ? <LoadingSpinner className="w-5 h-5" /> : <SaveIcon className="w-5 h-5" />}
-                {isSaving ? 'Saving...' : `Save (${selectedNodesForSave.size})`}
-                </button>
-            </>
-            )}
+            <button onClick={() => setIsTreeViewOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold text-sm">
+                <SitemapIcon className="w-5 h-5"/>
+                Map View
+            </button>
             <button
             onClick={onExit}
             className="px-5 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -219,10 +238,19 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
         <div className="w-full max-w-2xl flex flex-col gap-2">
             <div className="flex items-center justify-between w-full px-1">
                 <h3 className="text-lg font-semibold text-gray-300">Current Image</h3>
-                <button onClick={() => handleToggleNodeSelection(currentNode.id)} className="flex items-center gap-2 text-sm text-gray-400 hover:text-white" aria-label={selectedNodesForSave.has(currentNode.id) ? 'Deselect for saving' : 'Select for saving'}>
-                    {selectedNodesForSave.has(currentNode.id) ? <CheckboxCheckedIcon className="w-5 h-5 text-indigo-400" /> : <CheckboxUncheckedIcon className="w-5 h-5 text-gray-500" />}
-                    Save this image
-                </button>
+                <div className="flex items-center gap-2">
+                    <button onClick={handleSelectAllForSave} className="text-xs font-semibold text-gray-400 hover:text-white">Select All Visible</button>
+                    {selectedNodesForSave.size > 0 && <button onClick={handleDeselectAllForSave} className="text-xs text-gray-500 hover:text-white">Deselect All</button>}
+                    <button onClick={() => handleToggleNodeSelection(currentNode.id)} className="flex items-center gap-2 text-sm text-gray-400 hover:text-white" aria-label={selectedNodesForSave.has(currentNode.id) ? 'Deselect for saving' : 'Select for saving'}>
+                        {selectedNodesForSave.has(currentNode.id) ? <CheckboxCheckedIcon className="w-5 h-5 text-indigo-400" /> : <CheckboxUncheckedIcon className="w-5 h-5 text-gray-500" />}
+                    </button>
+                    {selectedNodesForSave.size > 0 &&
+                        <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 px-3 py-1 bg-green-600 hover:bg-green-500 rounded-lg font-semibold text-xs disabled:bg-green-800 disabled:cursor-not-allowed">
+                        {isSaving ? <LoadingSpinner className="w-4 h-4" /> : <SaveIcon className="w-4 h-4" />}
+                        {isSaving ? 'Saving...' : `Save (${selectedNodesForSave.size})`}
+                        </button>
+                    }
+                </div>
             </div>
             <div className={`aspect-video bg-gray-800 rounded-xl shadow-2xl p-2 transition-all ${selectedNodesForSave.has(currentNode.id) ? 'ring-2 ring-indigo-500' : ''}`}>
                 <img src={currentNode.imageUrl} alt="Current selection" className="object-contain w-full h-full rounded-lg" />
@@ -233,19 +261,24 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
         <div className="w-full max-w-6xl flex-grow flex flex-col items-center gap-4 mt-4 p-4 bg-gray-900/50 rounded-lg border border-gray-800">
             {!currentNode.ideas && childNodes.length === 0 && (
                  <button
-                    onClick={() => onExplore(currentNode.id)}
-                    disabled={currentNode.isExploring}
+                    onClick={() => onExplore(currentNode.id, numIdeas)}
+                    disabled={isAnyGenerating}
                     className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400"
                 >
                     {currentNode.isExploring ? <LoadingSpinner className="w-5 h-5"/> : <SparklesIcon className="w-5 h-5" />}
-                    {currentNode.isExploring ? 'Exploring Ideas...' : 'Explore From This Image'}
+                    {isAutoExploring ? 'Auto-Exploring...' : (currentNode.isExploring ? 'Exploring Ideas...' : 'Explore From This Image')}
                  </button>
             )}
 
             {currentNode.ideas && (
                 <div className="w-full">
-                    <div className="flex justify-center items-center mb-4 gap-4">
-                        <h2 className="text-xl font-semibold text-center text-gray-300">Creative Ideas</h2>
+                    <div className="flex flex-col items-center mb-4 gap-4">
+                        <div className="flex justify-center items-center gap-4">
+                            <h2 className="text-xl font-semibold text-center text-gray-300">Creative Ideas</h2>
+                             <button onClick={() => onExplore(currentNode.id, numIdeas)} disabled={isAnyGenerating} className="p-2 bg-gray-700 hover:bg-gray-600 rounded-full disabled:opacity-50" title="Refresh Ideas">
+                                {currentNode.isExploring ? <LoadingSpinner className="w-5 h-5" /> : <RefreshIcon className="w-5 h-5"/>}
+                             </button>
+                        </div>
                         {selectedIdeas.size > 0 && (
                              <button
                                 onClick={handleGenerateSelected}
@@ -308,6 +341,50 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
                 </div>
             )}
 
+            {/* Advanced Controls */}
+            <div className="w-full max-w-2xl mt-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700/50">
+                 <button onClick={() => setIsAdvanced(!isAdvanced)} className="w-full flex justify-between items-center font-semibold text-gray-300">
+                    <span>Advanced Controls</span>
+                    {isAdvanced ? <ChevronUpIcon className="w-6 h-6"/> : <ChevronDownIcon className="w-6 h-6"/>}
+                 </button>
+                 {isAdvanced && (
+                    <div className="mt-4 pt-4 border-t border-gray-700 flex flex-col md:flex-row items-center gap-4">
+                        <div className="flex items-center gap-2 w-full md:w-auto">
+                            <label htmlFor="numIdeas" className="text-sm font-medium text-gray-400 whitespace-nowrap">Ideas:</label>
+                            <input
+                                id="numIdeas"
+                                type="number"
+                                min="1"
+                                max="10"
+                                value={numIdeas}
+                                onChange={e => setNumIdeas(parseInt(e.target.value, 10))}
+                                className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2 w-full md:w-auto">
+                            <label htmlFor="autoExploreDepth" className="text-sm font-medium text-gray-400 whitespace-nowrap">Depth:</label>
+                            <input
+                                id="autoExploreDepth"
+                                type="number"
+                                min="1"
+                                max="10"
+                                value={autoExploreDepth}
+                                onChange={e => setAutoExploreDepth(parseInt(e.target.value, 10))}
+                                className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                        </div>
+                        <button
+                            onClick={handleStartAutoExplore}
+                            disabled={isAnyGenerating}
+                            className="w-full md:w-auto flex-grow flex items-center justify-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-teal-800 disabled:cursor-not-allowed rounded-lg font-semibold text-sm transition-colors"
+                        >
+                            {isAutoExploring ? <LoadingSpinner className="w-5 h-5"/> : <RobotIcon className="w-5 h-5"/>}
+                            {isAutoExploring ? `Exploring (${autoExploreDepth})...` : 'Start Auto-Explore'}
+                        </button>
+                    </div>
+                 )}
+            </div>
+
         </div>
       </main>
 
@@ -316,6 +393,15 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
             <p>{error}</p>
             <button onClick={clearError} className="absolute top-1 right-2 text-xl font-bold" aria-label="Close error message">&times;</button>
         </div>
+      )}
+
+      {isTreeViewOpen && (
+        <ExplorerTreeView
+            nodes={nodes}
+            currentNodeId={currentNodeId}
+            onNodeSelect={handleNavigateFromTree}
+            onClose={() => setIsTreeViewOpen(false)}
+        />
       )}
     </div>
   );

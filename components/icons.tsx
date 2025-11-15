@@ -90,3 +90,21 @@ export const CheckboxCheckedIcon: React.FC<{ className?: string }> = ({ classNam
         <path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
     </svg>
 );
+
+export const SitemapIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19.4 6.22A2.4 2.4 0 0017.5 5H15V3c0-1.1-.9-2-2-2h-2c-1.1 0-2 .9-2 2v2H6.5a2.5 2.5 0 00-2.37 1.63L2 14v5c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-5l-2.6-7.78zM9 19H5v-2h4v2zm0-4H5v-2h4v2zm6 4h-4v-2h4v2zm0-4h-4v-2h4v2zm6 4h-4v-2h4v2zm0-4h-4v-2h4v2zM15 9H9V7h6v2z"/>
+    </svg>
+);
+
+export const RefreshIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+    </svg>
+);
+
+export const RobotIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c0-5.52-4.48-10-10-10zm-4 12H6v-2h2v2zm8 0h-2v-2h2v2zm-2-4H8V8h4v2z"/>
+    </svg>
+);

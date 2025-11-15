@@ -340,34 +340,37 @@ Output only the edited image.
     setIsExplorerMode(true);
   };
 
-  const handleExploreFromNode = async (nodeId: string) => {
+  const handleExploreFromNode = async (nodeId: string, numIdeas: number = 4) => {
     setError(null);
-    setExplorerNodes(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], isExploring: true } }));
+    setExplorerNodes(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], isExploring: true, ideas: null } }));
     
     try {
-      // We need to get the image part for the node to explore
+      // We need to get the image part for the node to explore from the latest state
       const nodeToExplore = explorerNodes[nodeId];
       const response = await fetch(nodeToExplore.imageUrl);
       const blob = await response.blob();
       const file = new File([blob], "explorer_image.jpeg", { type: blob.type });
       const imagePart = await fileToGenerativePart(file);
 
-      const ideas = await exploreLatentSpace(imagePart);
+      const ideas = await exploreLatentSpace(imagePart, numIdeas);
       setExplorerNodes(prev => ({
         ...prev,
         [nodeId]: { ...prev[nodeId], ideas: ideas, isExploring: false }
       }));
+      return ideas; // Return for auto-explore
     } catch (err) {
       if (err instanceof Error) setError(err.message);
       else setError("An unknown error occurred while exploring ideas.");
       setExplorerNodes(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], isExploring: false } }));
+      return null;
     }
   };
 
-  const handleGenerateExplorerNode = async (parentId: string, idea: LatentSpaceIdea, ideaIndex: number) => {
+  const handleGenerateExplorerNode = async (parentId: string, idea: LatentSpaceIdea, ideaIndex: number): Promise<string | null> => {
     setError(null);
     setExplorerNodes(prev => {
         const parent = prev[parentId];
+        if (!parent) return prev;
         return {
             ...prev,
             [parentId]: { ...parent, generatingIdeaIndices: [...parent.generatingIdeaIndices, ideaIndex] }
@@ -390,6 +393,7 @@ Output only the edited image.
 
       setExplorerNodes(prev => {
         const parentNode = prev[parentId];
+        if (!parentNode) return prev;
         return {
           ...prev,
           [parentId]: {
@@ -399,16 +403,15 @@ Output only the edited image.
           [newNodeId]: newNode
         };
       });
-      
-      // Do not auto-navigate, let the user decide.
-      // setCurrentNodeId(newNodeId);
-
+      return newNodeId;
     } catch (err) {
       if (err instanceof Error) setError(err.message);
       else setError("An unknown error occurred while generating the image.");
+      return null;
     } finally {
       setExplorerNodes(prev => {
         const parent = prev[parentId];
+        if (!parent) return prev;
         return {
             ...prev,
             [parentId]: {
@@ -420,6 +423,28 @@ Output only the edited image.
     }
   };
 
+  const handleAutoExplore = async (startNodeId: string, depth: number, numIdeas: number) => {
+    let currentId = startNodeId;
+    for (let i = 0; i < depth; i++) {
+        const ideas = await handleExploreFromNode(currentId, numIdeas);
+        if (!ideas || ideas.length === 0) {
+            setError("Auto-explore stopped: model did not return any creative ideas.");
+            break;
+        }
+        
+        const ideaToGenerate = ideas[0]; // Always pick the first idea for the chain
+        const nextNodeId = await handleGenerateExplorerNode(currentId, ideaToGenerate, 0);
+
+        if (!nextNodeId) {
+            setError("Auto-explore stopped: failed to generate the next image in the chain.");
+            break;
+        }
+
+        currentId = nextNodeId;
+        setCurrentNodeId(currentId); // Navigate to the new node
+    }
+  };
+
   if (isExplorerMode) {
     return (
       <ExplorerMode
@@ -428,6 +453,7 @@ Output only the edited image.
         onNavigate={setCurrentNodeId}
         onExplore={handleExploreFromNode}
         onGenerate={handleGenerateExplorerNode}
+        onAutoExplore={handleAutoExplore}
         onExit={() => setIsExplorerMode(false)}
         error={error}
         clearError={() => setError(null)}
