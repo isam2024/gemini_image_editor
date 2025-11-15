@@ -443,40 +443,44 @@ Output only the edited image.
     }
   };
 
-  // Fix: Refactored to remove incorrect assignment to a constant state setter.
-  // The original implementation tried to monkey-patch `setExplorerNodes` to track state changes
-  // within a long-running async function. This is not allowed as `setExplorerNodes` is a constant.
-  // The correct approach, implemented below, is to rely on a `ref` (`explorerNodesRef`)
-  // that is kept in sync with the state via a `useEffect` hook. After an `await` point,
-  // which allows for re-renders, we can read `explorerNodesRef.current` to get the latest state.
   const handleAutoExplore = async (startNodeId: string, depth: number, numIdeas: number, updateStatus: (status: string) => void) => {
+    console.log(`%c[Auto-Explore] Starting exploration from node ${startNodeId} to depth ${depth}.`, 'color: #88aaff; font-weight: bold;');
     let currentNodesToProcess = [startNodeId];
 
     for (let currentDepth = 0; currentDepth < depth; currentDepth++) {
-        updateStatus(`Level ${currentDepth + 1}/${depth}: Exploring ideas for ${currentNodesToProcess.length} image(s)...`);
+        const level = currentDepth + 1;
+        console.log(`%c[Auto-Explore] --- Level ${level}/${depth} ---`, 'color: #88aaff; font-weight: bold;');
+        console.log(`[Auto-Explore] Nodes to process this level:`, currentNodesToProcess);
+        updateStatus(`Level ${level}/${depth}: Exploring ideas for ${currentNodesToProcess.length} image(s)...`);
 
         const ideaPromises = currentNodesToProcess.map(nodeId =>
-            handleExploreFromNode(nodeId, numIdeas)
+            handleExploreFromNode(nodeId, numIdeas).catch(e => {
+                console.error(`[Auto-Explore] Error fetching ideas for node ${nodeId}:`, e);
+                return null; // Prevent Promise.all from rejecting
+            })
         );
 
         await Promise.all(ideaPromises);
 
-        // After getting ideas, we need to get the latest state before generating.
-        // We read from the ref, which is updated by the useEffect hook after state changes.
         const nodesAfterIdeas = explorerNodesRef.current;
         const generationQueue: { nodeId: string, idea: LatentSpaceIdea, index: number }[] = [];
 
         currentNodesToProcess.forEach(nodeId => {
             const node = nodesAfterIdeas[nodeId];
-            if (node && node.ideas) {
+            if (node && node.ideas && node.ideas.length > 0) {
                 node.ideas.forEach((idea, index) => {
                     generationQueue.push({ nodeId, idea, index });
                 });
+            } else {
+                 console.warn(`[Auto-Explore] No ideas found or available for node ${nodeId}.`);
             }
         });
 
+        console.log(`[Auto-Explore] Level ${level}: Created generation queue with ${generationQueue.length} items.`);
+
         if (generationQueue.length === 0) {
-            updateStatus(`Auto-explore stopped: model did not return any creative ideas.`);
+            updateStatus(`Auto-explore stopped: No new ideas to generate.`);
+            console.warn(`[Auto-Explore] Halting exploration at level ${level} due to empty generation queue.`);
             await new Promise(resolve => setTimeout(resolve, 2000));
             break;
         }
@@ -484,18 +488,31 @@ Output only the edited image.
         const nextLevelNodeIds: string[] = [];
         let generatedCount = 0;
 
-        // Process generation requests sequentially to avoid rate limits
         for (const item of generationQueue) {
             generatedCount++;
-            updateStatus(`Level ${currentDepth + 1}/${depth}: Generating image ${generatedCount}/${generationQueue.length}...`);
-            const newNodeId = await handleGenerateExplorerNode(item.nodeId, item.idea, item.index);
+            updateStatus(`Level ${level}/${depth}: Generating image ${generatedCount}/${generationQueue.length}...`);
+            console.log(`[Auto-Explore] Generating image ${generatedCount}/${generationQueue.length} from idea for node ${item.nodeId}. Prompt: "${item.idea.suggestedPrompt}"`);
+            
+            const newNodeId = await handleGenerateExplorerNode(item.nodeId, item.idea, item.index)
+              .catch(e => {
+                  console.error(`[Auto-Explore] Error generating image for node ${item.nodeId}:`, e);
+                  setError(`Failed to generate image from prompt: "${item.idea.suggestedPrompt.substring(0, 50)}...". Check console for details.`);
+                  return null;
+              });
+
             if (newNodeId) {
+                console.log(`%c[Auto-Explore] Successfully generated new node ${newNodeId}.`, 'color: #88ff88');
                 nextLevelNodeIds.push(newNodeId);
+            } else {
+                console.warn(`%c[Auto-Explore] Failed to generate new node from idea for node ${item.nodeId}.`, 'color: #ffaa88');
             }
         }
+        
+        console.log(`[Auto-Explore] Level ${level}: Generated ${nextLevelNodeIds.length} new nodes.`);
 
         if (nextLevelNodeIds.length === 0) {
-            updateStatus(`Exploration stopped at level ${currentDepth + 1}. Failed to generate new images.`);
+            updateStatus(`Exploration stopped at level ${level}. Failed to generate new images.`);
+            console.warn(`[Auto-Explore] Halting exploration at level ${level} as no new images were generated.`);
             await new Promise(resolve => setTimeout(resolve, 2000));
             break;
         }
@@ -503,7 +520,7 @@ Output only the edited image.
         currentNodesToProcess = nextLevelNodeIds;
     }
 
-    // Do not navigate, stay on the start node to observe the results.
+    console.log('%c[Auto-Explore] Exploration complete.', 'color: #88aaff; font-weight: bold;');
     updateStatus('Auto-Exploration Complete!');
   };
 
