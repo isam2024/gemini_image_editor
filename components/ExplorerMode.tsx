@@ -12,7 +12,7 @@ interface ExplorerModeProps {
   onNavigate: (nodeId: string) => void;
   onExplore: (nodeId: string, numIdeas: number) => void;
   onGenerate: (parentId: string, idea: LatentSpaceIdea, ideaIndex: number) => void;
-  onAutoExplore: (startNodeId: string, depth: number, numIdeas: number) => Promise<void>;
+  onAutoExplore: (startNodeId: string, depth: number, numIdeas: number, updateStatus: (status: string) => void) => Promise<void>;
   onExit: () => void;
   error: string | null;
   clearError: () => void;
@@ -69,8 +69,9 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
   // Advanced mode state
   const [isAdvanced, setIsAdvanced] = useState(false);
   const [numIdeas, setNumIdeas] = useState(5);
-  const [autoExploreDepth, setAutoExploreDepth] = useState(3);
+  const [autoExploreDepth, setAutoExploreDepth] = useState(2);
   const [isAutoExploring, setIsAutoExploring] = useState(false);
+  const [autoExploreStatus, setAutoExploreStatus] = useState('');
 
   if (!currentNodeId || !nodes[currentNodeId]) {
     return (
@@ -190,10 +191,20 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
   const handleStartAutoExplore = async () => {
     if (isAnyGenerating) return;
     setIsAutoExploring(true);
+    setAutoExploreStatus('Initializing...');
     try {
-      await onAutoExplore(currentNodeId, autoExploreDepth, numIdeas);
-    } finally {
-      setIsAutoExploring(false);
+      await onAutoExplore(currentNodeId, autoExploreDepth, numIdeas, setAutoExploreStatus);
+      setTimeout(() => {
+        setIsAutoExploring(false);
+        setAutoExploreStatus('');
+      }, 3000);
+    } catch (err) {
+      console.error("Auto-explore failed:", err);
+      setAutoExploreStatus('An error occurred during exploration.');
+      setTimeout(() => {
+        setIsAutoExploring(false);
+        setAutoExploreStatus('');
+      }, 3000);
     }
   };
 
@@ -367,7 +378,7 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
                                 id="autoExploreDepth"
                                 type="number"
                                 min="1"
-                                max="10"
+                                max="5"
                                 value={autoExploreDepth}
                                 onChange={e => setAutoExploreDepth(parseInt(e.target.value, 10))}
                                 className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -379,7 +390,7 @@ export const ExplorerMode: React.FC<ExplorerModeProps> = ({
                             className="w-full md:w-auto flex-grow flex items-center justify-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-teal-800 disabled:cursor-not-allowed rounded-lg font-semibold text-sm transition-colors"
                         >
                             {isAutoExploring ? <LoadingSpinner className="w-5 h-5"/> : <RobotIcon className="w-5 h-5"/>}
-                            {isAutoExploring ? `Exploring (${autoExploreDepth})...` : 'Start Auto-Explore'}
+                            {isAutoExploring ? autoExploreStatus : 'Start Auto-Explore'}
                         </button>
                     </div>
                  )}

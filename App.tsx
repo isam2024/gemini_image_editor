@@ -67,6 +67,12 @@ const App: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const analysisIntervalRef = useRef<number | null>(null);
+
+  // Ref to hold the latest explorerNodes state for async functions
+  const explorerNodesRef = useRef(explorerNodes);
+  useEffect(() => {
+    explorerNodesRef.current = explorerNodes;
+  }, [explorerNodes]);
   
   useEffect(() => {
     return () => {
@@ -343,25 +349,39 @@ Output only the edited image.
   const handleExploreFromNode = async (nodeId: string, numIdeas: number = 4) => {
     setError(null);
     setExplorerNodes(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], isExploring: true, ideas: null } }));
-    
+
     try {
-      // We need to get the image part for the node to explore from the latest state
-      const nodeToExplore = explorerNodes[nodeId];
+      // Use the ref to get the latest state, preventing stale closure issues
+      const nodeToExplore = explorerNodesRef.current[nodeId];
+      if (!nodeToExplore) {
+        throw new Error(`Auto-explore error: Could not find node with ID ${nodeId}.`);
+      }
       const response = await fetch(nodeToExplore.imageUrl);
       const blob = await response.blob();
       const file = new File([blob], "explorer_image.jpeg", { type: blob.type });
       const imagePart = await fileToGenerativePart(file);
 
       const ideas = await exploreLatentSpace(imagePart, numIdeas);
-      setExplorerNodes(prev => ({
-        ...prev,
-        [nodeId]: { ...prev[nodeId], ideas: ideas, isExploring: false }
-      }));
+      if (!ideas || ideas.length === 0) {
+        console.warn(`Model did not return any creative ideas for node ${nodeId}.`);
+      }
+
+      setExplorerNodes(prev => {
+        // Ensure the node still exists before updating
+        if (!prev[nodeId]) return prev;
+        return {
+          ...prev,
+          [nodeId]: { ...prev[nodeId], ideas: ideas || [], isExploring: false }
+        };
+      });
       return ideas; // Return for auto-explore
     } catch (err) {
       if (err instanceof Error) setError(err.message);
       else setError("An unknown error occurred while exploring ideas.");
-      setExplorerNodes(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], isExploring: false } }));
+      setExplorerNodes(prev => {
+        if (!prev[nodeId]) return prev;
+        return { ...prev, [nodeId]: { ...prev[nodeId], isExploring: false } }
+      });
       return null;
     }
   };
@@ -423,26 +443,68 @@ Output only the edited image.
     }
   };
 
-  const handleAutoExplore = async (startNodeId: string, depth: number, numIdeas: number) => {
-    let currentId = startNodeId;
-    for (let i = 0; i < depth; i++) {
-        const ideas = await handleExploreFromNode(currentId, numIdeas);
-        if (!ideas || ideas.length === 0) {
-            setError("Auto-explore stopped: model did not return any creative ideas.");
+  // Fix: Refactored to remove incorrect assignment to a constant state setter.
+  // The original implementation tried to monkey-patch `setExplorerNodes` to track state changes
+  // within a long-running async function. This is not allowed as `setExplorerNodes` is a constant.
+  // The correct approach, implemented below, is to rely on a `ref` (`explorerNodesRef`)
+  // that is kept in sync with the state via a `useEffect` hook. After an `await` point,
+  // which allows for re-renders, we can read `explorerNodesRef.current` to get the latest state.
+  const handleAutoExplore = async (startNodeId: string, depth: number, numIdeas: number, updateStatus: (status: string) => void) => {
+    let currentNodesToProcess = [startNodeId];
+
+    for (let currentDepth = 0; currentDepth < depth; currentDepth++) {
+        updateStatus(`Level ${currentDepth + 1}/${depth}: Exploring ideas for ${currentNodesToProcess.length} image(s)...`);
+
+        const ideaPromises = currentNodesToProcess.map(nodeId =>
+            handleExploreFromNode(nodeId, numIdeas)
+        );
+
+        await Promise.all(ideaPromises);
+
+        // After getting ideas, we need to get the latest state before generating.
+        // We read from the ref, which is updated by the useEffect hook after state changes.
+        const nodesAfterIdeas = explorerNodesRef.current;
+        const generationQueue: { nodeId: string, idea: LatentSpaceIdea, index: number }[] = [];
+
+        currentNodesToProcess.forEach(nodeId => {
+            const node = nodesAfterIdeas[nodeId];
+            if (node && node.ideas) {
+                node.ideas.forEach((idea, index) => {
+                    generationQueue.push({ nodeId, idea, index });
+                });
+            }
+        });
+
+        if (generationQueue.length === 0) {
+            updateStatus(`Auto-explore stopped: model did not return any creative ideas.`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
             break;
         }
-        
-        const ideaToGenerate = ideas[0]; // Always pick the first idea for the chain
-        const nextNodeId = await handleGenerateExplorerNode(currentId, ideaToGenerate, 0);
 
-        if (!nextNodeId) {
-            setError("Auto-explore stopped: failed to generate the next image in the chain.");
+        const nextLevelNodeIds: string[] = [];
+        let generatedCount = 0;
+
+        // Process generation requests sequentially to avoid rate limits
+        for (const item of generationQueue) {
+            generatedCount++;
+            updateStatus(`Level ${currentDepth + 1}/${depth}: Generating image ${generatedCount}/${generationQueue.length}...`);
+            const newNodeId = await handleGenerateExplorerNode(item.nodeId, item.idea, item.index);
+            if (newNodeId) {
+                nextLevelNodeIds.push(newNodeId);
+            }
+        }
+
+        if (nextLevelNodeIds.length === 0) {
+            updateStatus(`Exploration stopped at level ${currentDepth + 1}. Failed to generate new images.`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
             break;
         }
 
-        currentId = nextNodeId;
-        setCurrentNodeId(currentId); // Navigate to the new node
+        currentNodesToProcess = nextLevelNodeIds;
     }
+
+    // Do not navigate, stay on the start node to observe the results.
+    updateStatus('Auto-Exploration Complete!');
   };
 
   if (isExplorerMode) {
