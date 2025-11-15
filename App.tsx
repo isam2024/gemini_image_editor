@@ -453,22 +453,23 @@ Output only the edited image.
         console.log(`[Auto-Explore] Nodes to process this level:`, currentNodesToProcess);
         updateStatus(`Level ${level}/${depth}: Exploring ideas for ${currentNodesToProcess.length} image(s)...`);
 
-        const ideaPromises = currentNodesToProcess.map(nodeId =>
-            handleExploreFromNode(nodeId, numIdeas).catch(e => {
-                console.error(`[Auto-Explore] Error fetching ideas for node ${nodeId}:`, e);
-                return null; // Prevent Promise.all from rejecting
-            })
+        const ideasResults = await Promise.all(
+            currentNodesToProcess.map(nodeId =>
+                handleExploreFromNode(nodeId, numIdeas).catch(e => {
+                    console.error(`[Auto-Explore] Error fetching ideas for node ${nodeId}:`, e);
+                    updateStatus(`Error exploring node ${nodeId.substring(0,8)}...`);
+                    return null; // Prevent Promise.all from rejecting
+                })
+            )
         );
 
-        await Promise.all(ideaPromises);
-
-        const nodesAfterIdeas = explorerNodesRef.current;
         const generationQueue: { nodeId: string, idea: LatentSpaceIdea, index: number }[] = [];
 
-        currentNodesToProcess.forEach(nodeId => {
-            const node = nodesAfterIdeas[nodeId];
-            if (node && node.ideas && node.ideas.length > 0) {
-                node.ideas.forEach((idea, index) => {
+        ideasResults.forEach((ideas, i) => {
+            const nodeId = currentNodesToProcess[i];
+            if (ideas && ideas.length > 0) {
+                console.log(`[Auto-Explore] Node ${nodeId} has ${ideas.length} ideas. Adding to generation queue.`);
+                ideas.forEach((idea, index) => {
                     generationQueue.push({ nodeId, idea, index });
                 });
             } else {
