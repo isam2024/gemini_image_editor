@@ -1,8 +1,12 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { editImageWithPrompt, analyzeImageWithSSPP } from './services/geminiService';
+import { editImageWithPrompt, analyzeImageWithSSPP, exploreLatentSpace } from './services/geminiService';
 import { fileToGenerativePart } from './utils/fileUtils';
-import { ImagePart } from './types';
-import { LoadingSpinner, UploadIcon, MagicIcon, AnalyzeIcon, DownloadIcon, ChevronUpIcon, ChevronDownIcon, CheckIcon, InfoIcon } from './components/icons';
+import { ImagePart, LatentSpaceIdea, IdeasHistoryItem, ExplorerNode } from './types';
+import { LoadingSpinner, UploadIcon, MagicIcon, AnalyzeIcon, DownloadIcon, ChevronUpIcon, ChevronDownIcon, CheckIcon, InfoIcon, SparklesIcon, GitBranchIcon } from './components/icons';
+import { LatentSpaceExplorer } from './components/LatentSpaceExplorer';
+import { ExplorerMode } from './components/ExplorerMode';
+import { v4 as uuidv4 } from 'uuid';
+
 
 const DEFAULT_IMAGE_URL = 'https://picsum.photos/seed/gemini-image-editor/1024/768';
 
@@ -49,10 +53,21 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
 
+  const [isExploring, setIsExploring] = useState<boolean>(false);
+  const [latentSpaceIdeas, setLatentSpaceIdeas] = useState<LatentSpaceIdea[]>([]);
+  const [isLatentSpaceModalOpen, setIsLatentSpaceModalOpen] = useState<boolean>(false);
+  const [ideasHistory, setIdeasHistory] = useState<IdeasHistoryItem[]>([]);
+  const [isIdeasHistoryOpen, setIsIdeasHistoryOpen] = useState<boolean>(false);
+
+  // New Explorer Mode State
+  const [isExplorerMode, setIsExplorerMode] = useState<boolean>(false);
+  const [explorerNodes, setExplorerNodes] = useState<Record<string, ExplorerNode>>({});
+  const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
+
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const analysisIntervalRef = useRef<number | null>(null);
   
-  // Cleanup interval on unmount
   useEffect(() => {
     return () => {
       if (analysisIntervalRef.current) {
@@ -61,15 +76,25 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const handleImageUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
+  const resetStateForNewImage = () => {
       setError(null);
       setEditedImageUrl(null);
       setSsppDescription(null);
       setAnalysisCompleted(false);
       setPrompt('');
       setLastGenerationPrompt(null);
+      setLatentSpaceIdeas([]);
+      setHistory([]);
+      // Reset explorer state
+      setIsExplorerMode(false);
+      setExplorerNodes({});
+      setCurrentNodeId(null);
+  };
+
+  const handleImageUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      resetStateForNewImage();
       try {
         const imagePart = await fileToGenerativePart(file);
         setOriginalImagePart(imagePart);
@@ -120,7 +145,6 @@ const App: React.FC = () => {
     }
 
     const analysisWork = async () => {
-      // Animate through SSPP layers quickly
       await new Promise<void>((resolve) => {
         analysisIntervalRef.current = window.setInterval(() => {
           setAnalysisProgress((prev) => {
@@ -136,20 +160,18 @@ const App: React.FC = () => {
         }, 200);
       });
 
-      // Proceed with actual API call steps
-      setAnalysisProgress(ssppLayers.length); // "Sending request..."
+      setAnalysisProgress(ssppLayers.length);
       const analysisPromise = analyzeImageWithSSPP(imagePartToAnalyze);
       
-      setAnalysisProgress(ssppLayers.length + 1); // "Awaiting response..."
+      setAnalysisProgress(ssppLayers.length + 1);
       const description = await analysisPromise;
       
-      setAnalysisProgress(ssppLayers.length + 2); // "Parsing the result..."
-      // Small delay to make the last step readable
+      setAnalysisProgress(ssppLayers.length + 2);
       await new Promise(resolve => setTimeout(resolve, 500));
 
       setSsppDescription(description);
       setAnalysisCompleted(true);
-      setAnalysisProgress(allAnalysisSteps.length - 1); // Mark as complete
+      setAnalysisProgress(allAnalysisSteps.length - 1);
     };
 
     analysisWork()
@@ -160,9 +182,80 @@ const App: React.FC = () => {
         } else {
           setError('An unknown error occurred during analysis.');
         }
-        setIsAnalyzing(false); // Stop on error
+        setIsAnalyzing(false);
       });
   };
+
+  const handleExploreLatentSpace = async () => {
+    setIsExploring(true);
+    setError(null);
+    setLatentSpaceIdeas([]);
+    
+    const imagePartToExplore = await getImagePart();
+    if (!imagePartToExplore) {
+        setIsExploring(false);
+        return;
+    }
+    const imageUrlForHistory = originalImageUrl;
+
+    try {
+        const ideas = await exploreLatentSpace(imagePartToExplore);
+        setLatentSpaceIdeas(ideas);
+        setIsLatentSpaceModalOpen(true);
+        if (ideas.length > 0) {
+            setIdeasHistory(prevHistory => [{ imageUrl: imageUrlForHistory, ideas }, ...prevHistory]);
+        }
+    } catch (err) {
+        if (err instanceof Error) {
+            setError(err.message);
+        } else {
+            setError('An unknown error occurred during latent space exploration.');
+        }
+    } finally {
+        setIsExploring(false);
+    }
+  };
+
+  const handleGenerateFromIdea = async (ideaPrompt: string) => {
+    setIsLatentSpaceModalOpen(false);
+    setIsLoading(true);
+    setError(null);
+    setEditedImageUrl(null);
+    const fullPrompt = `Based on a creative exploration of a previous image, generate: "${ideaPrompt}"`;
+    setLastGenerationPrompt(fullPrompt);
+
+    try {
+      const newImageUrl = await editImageWithPrompt(null, ideaPrompt);
+      setEditedImageUrl(newImageUrl);
+      setHistory(prevHistory => [{ imageUrl: newImageUrl, prompt: ideaPrompt }, ...prevHistory]);
+    } catch (err) {
+        if (err instanceof Error) {
+            setError(err.message);
+        } else {
+            setError('An unknown error occurred while generating the image.');
+        }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleExportIdeas = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (ideasHistory.length === 0) return;
+
+    const dataStr = JSON.stringify(ideasHistory, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+    const dataUrl = URL.createObjectURL(dataBlob);
+
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = `gemini-image-editor-ideas-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(dataUrl);
+  };
+
 
   useEffect(() => {
     if (analysisCompleted) {
@@ -179,7 +272,8 @@ const App: React.FC = () => {
       setError('Please enter an editing prompt.');
       return;
     }
-    if (!ssppDescription || !originalImagePart) {
+    const imagePartToEdit = await getImagePart();
+    if (!ssppDescription || !imagePartToEdit) {
       setError('Please analyze the image first before generating an edit.');
       return;
     }
@@ -201,7 +295,7 @@ Output only the edited image.
     setLastGenerationPrompt(combinedPrompt);
 
     try {
-      const newImageUrl = await editImageWithPrompt(originalImagePart, combinedPrompt);
+      const newImageUrl = await editImageWithPrompt(imagePartToEdit, combinedPrompt);
       setEditedImageUrl(newImageUrl);
       setHistory(prevHistory => [{ imageUrl: newImageUrl, prompt }, ...prevHistory]);
     } catch (err) {
@@ -228,6 +322,120 @@ Output only the edited image.
     }
   }, []);
 
+  // Explorer Mode Handlers
+  const handleStartExploration = () => {
+    const rootId = uuidv4();
+    const rootNode: ExplorerNode = {
+      id: rootId,
+      parentId: null,
+      childrenIds: [],
+      imageUrl: originalImageUrl,
+      prompt: null,
+      ideas: null,
+      isExploring: false,
+      generatingIdeaIndices: [],
+    };
+    setExplorerNodes({ [rootId]: rootNode });
+    setCurrentNodeId(rootId);
+    setIsExplorerMode(true);
+  };
+
+  const handleExploreFromNode = async (nodeId: string) => {
+    setError(null);
+    setExplorerNodes(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], isExploring: true } }));
+    
+    try {
+      // We need to get the image part for the node to explore
+      const nodeToExplore = explorerNodes[nodeId];
+      const response = await fetch(nodeToExplore.imageUrl);
+      const blob = await response.blob();
+      const file = new File([blob], "explorer_image.jpeg", { type: blob.type });
+      const imagePart = await fileToGenerativePart(file);
+
+      const ideas = await exploreLatentSpace(imagePart);
+      setExplorerNodes(prev => ({
+        ...prev,
+        [nodeId]: { ...prev[nodeId], ideas: ideas, isExploring: false }
+      }));
+    } catch (err) {
+      if (err instanceof Error) setError(err.message);
+      else setError("An unknown error occurred while exploring ideas.");
+      setExplorerNodes(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], isExploring: false } }));
+    }
+  };
+
+  const handleGenerateExplorerNode = async (parentId: string, idea: LatentSpaceIdea, ideaIndex: number) => {
+    setError(null);
+    setExplorerNodes(prev => {
+        const parent = prev[parentId];
+        return {
+            ...prev,
+            [parentId]: { ...parent, generatingIdeaIndices: [...parent.generatingIdeaIndices, ideaIndex] }
+        };
+    });
+    
+    try {
+      const newImageUrl = await editImageWithPrompt(null, idea.suggestedPrompt);
+      const newNodeId = uuidv4();
+      const newNode: ExplorerNode = {
+        id: newNodeId,
+        parentId: parentId,
+        childrenIds: [],
+        imageUrl: newImageUrl,
+        prompt: idea.suggestedPrompt,
+        ideas: null,
+        isExploring: false,
+        generatingIdeaIndices: [],
+      };
+
+      setExplorerNodes(prev => {
+        const parentNode = prev[parentId];
+        return {
+          ...prev,
+          [parentId]: {
+            ...parentNode,
+            childrenIds: [...parentNode.childrenIds, newNodeId],
+          },
+          [newNodeId]: newNode
+        };
+      });
+      
+      // Do not auto-navigate, let the user decide.
+      // setCurrentNodeId(newNodeId);
+
+    } catch (err) {
+      if (err instanceof Error) setError(err.message);
+      else setError("An unknown error occurred while generating the image.");
+    } finally {
+      setExplorerNodes(prev => {
+        const parent = prev[parentId];
+        return {
+            ...prev,
+            [parentId]: {
+                ...parent,
+                generatingIdeaIndices: parent.generatingIdeaIndices.filter(i => i !== ideaIndex)
+            }
+        };
+      });
+    }
+  };
+
+  if (isExplorerMode) {
+    return (
+      <ExplorerMode
+        nodes={explorerNodes}
+        currentNodeId={currentNodeId}
+        onNavigate={setCurrentNodeId}
+        onExplore={handleExploreFromNode}
+        onGenerate={handleGenerateExplorerNode}
+        onExit={() => setIsExplorerMode(false)}
+        error={error}
+        clearError={() => setError(null)}
+      />
+    );
+  }
+
+  // Regular Editor UI
   const ImagePanel: React.FC<{ title: string; imageUrl: string | null; isLoading?: boolean; fullPrompt?: string | null }> = ({ title, imageUrl, isLoading, fullPrompt }) => {
     const [isPromptVisible, setIsPromptVisible] = useState(false);
     return (
@@ -317,31 +525,45 @@ Output only the edited image.
           <ImagePanel title="Edited" imageUrl={editedImageUrl} isLoading={isLoading} fullPrompt={lastGenerationPrompt} />
         </main>
         
-        <section className="my-8 max-w-4xl mx-auto w-full px-4 flex flex-col items-center">
-          {ssppDescription && !isAnalyzing ? (
-            <div className="text-center">
-                <p className="text-lg text-green-400 font-semibold flex items-center justify-center gap-2 mb-4">
-                    <CheckIcon className="w-6 h-6" />
-                    Analysis Complete
-                </p>
-                <button 
-                    onClick={() => setIsAnalysisModalOpen(true)}
-                    className="px-5 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                    View SSPP Analysis
-                </button>
-            </div>
-          ) : isAnalyzing ? (
+        <section className="my-8 max-w-4xl mx-auto w-full px-4 flex flex-col items-center gap-4">
+          {isAnalyzing ? (
             <AnalysisProgressIndicator />
           ) : (
-            <button 
-              onClick={handleAnalyze} 
-              disabled={isAnalyzing}
-              className="flex items-center justify-center gap-2 px-6 py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <AnalyzeIcon className="w-5 h-5"/>
-              Analyze Image
-            </button>
+            <div className="flex flex-col sm:flex-row gap-4 items-center justify-center">
+              {ssppDescription ? (
+                <div className="text-center p-4 bg-gray-800/50 rounded-lg">
+                  <p className="text-lg text-green-400 font-semibold flex items-center justify-center gap-2 mb-2">
+                    <CheckIcon className="w-6 h-6" />
+                    Analysis Complete
+                  </p>
+                  <button
+                    onClick={() => setIsAnalysisModalOpen(true)}
+                    className="px-5 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    View SSPP Analysis
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={handleAnalyze}
+                  disabled={isExploring}
+                  className="flex items-center justify-center gap-2 px-6 py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <AnalyzeIcon className="w-5 h-5" />
+                  Analyze Image
+                </button>
+              )}
+              
+              <button
+                onClick={handleExploreLatentSpace}
+                disabled={isAnalyzing || isExploring}
+                className="flex items-center justify-center gap-2 px-6 py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500"
+                aria-label="Explore creative ideas from the image"
+              >
+                {isExploring ? <LoadingSpinner className="w-5 h-5" /> : <SparklesIcon className="w-5 h-5" />}
+                {isExploring ? 'Exploring...' : 'Explore Ideas'}
+              </button>
+            </div>
           )}
         </section>
 
@@ -353,7 +575,7 @@ Output only the edited image.
                 className="w-full flex justify-between items-center p-4 font-semibold text-lg text-gray-300 hover:bg-gray-700/50 rounded-t-lg transition-colors"
                 aria-expanded={isHistoryOpen}
               >
-                <span>History ({history.length} {history.length === 1 ? 'item' : 'items'})</span>
+                <span>Image History ({history.length} {history.length === 1 ? 'item' : 'items'})</span>
                 {isHistoryOpen ? <ChevronUpIcon className="w-6 h-6" /> : <ChevronDownIcon className="w-6 h-6" />}
               </button>
               {isHistoryOpen && (
@@ -378,7 +600,78 @@ Output only the edited image.
             </div>
           </section>
         )}
+
+        {ideasHistory.length > 0 && (
+            <section className="mt-8 max-w-6xl mx-auto w-full">
+                <div className="bg-gray-800/50 rounded-lg">
+                    <div className="w-full flex justify-between items-center p-4 font-semibold text-lg text-gray-300 hover:bg-gray-700/50 rounded-t-lg transition-colors cursor-pointer"
+                        onClick={() => setIsIdeasHistoryOpen(!isIdeasHistoryOpen)}
+                        role="button"
+                        aria-expanded={isIdeasHistoryOpen}
+                    >
+                        <span className="flex items-center gap-2">
+                            <SparklesIcon className="w-6 h-6 text-purple-400" />
+                            Idea History ({ideasHistory.length} {ideasHistory.length === 1 ? 'session' : 'sessions'})
+                        </span>
+                        <div className="flex items-center gap-4">
+                             <button
+                                onClick={handleExportIdeas}
+                                className="flex items-center justify-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                aria-label="Export idea history"
+                              >
+                                <DownloadIcon className="w-5 h-5" />
+                                Export
+                              </button>
+                            {isIdeasHistoryOpen ? <ChevronUpIcon className="w-6 h-6" /> : <ChevronDownIcon className="w-6 h-6" />}
+                        </div>
+                    </div>
+                    {isIdeasHistoryOpen && (
+                        <div className="p-4 border-t border-gray-700 flex flex-col gap-6">
+                            {ideasHistory.map((item, index) => (
+                                <div key={index} className="bg-gray-800 rounded-lg p-4 flex flex-col md:flex-row gap-4">
+                                    <div className="flex-shrink-0 w-full md:w-48">
+                                        <div className="aspect-square w-full bg-gray-900/50 rounded-md flex items-center justify-center overflow-hidden">
+                                             <img src={item.imageUrl} alt={`Source image for idea session ${index + 1}`} className="object-contain max-w-full max-h-full" />
+                                        </div>
+                                    </div>
+                                    <div className="flex-1 flex flex-col gap-4">
+                                        {item.ideas.map((idea, ideaIndex) => (
+                                            <div key={ideaIndex} className="bg-gray-900/50 p-3 rounded-lg flex flex-col justify-between gap-3 border border-gray-700/50">
+                                                 <div>
+                                                    <p className="text-gray-300 italic mb-2 text-sm">
+                                                      &ldquo;{idea.description}&rdquo;
+                                                    </p>
+                                                    <p className="text-xs font-mono text-indigo-300 bg-gray-800/70 p-2 rounded-md">
+                                                      {idea.suggestedPrompt}
+                                                    </p>
+                                                  </div>
+                                                  <button
+                                                    onClick={() => handleGenerateFromIdea(idea.suggestedPrompt)}
+                                                    disabled={isLoading}
+                                                    className="self-end flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed rounded-lg font-semibold text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                                  >
+                                                    <MagicIcon className="w-5 h-5" />
+                                                    {isLoading ? 'Generating...' : 'Generate'}
+                                                  </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </section>
+        )}
       </div>
+
+      <LatentSpaceExplorer
+        isOpen={isLatentSpaceModalOpen}
+        onClose={() => setIsLatentSpaceModalOpen(false)}
+        ideas={latentSpaceIdeas}
+        onGenerate={handleGenerateFromIdea}
+        isGenerating={isLoading}
+      />
 
       {isAnalysisModalOpen && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setIsAnalysisModalOpen(false)}>
@@ -407,41 +700,54 @@ Output only the edited image.
       )}
 
       <footer className="fixed bottom-0 left-0 right-0 bg-gray-900/80 backdrop-blur-sm border-t border-gray-700 p-4 z-10">
-        <form onSubmit={handleGenerate} className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center gap-4">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleImageUpload}
-            accept="image/png, image/jpeg, image/webp"
-            className="hidden"
-            aria-hidden="true"
-          />
+        <div className="max-w-4xl mx-auto flex items-center gap-4">
+          <form onSubmit={handleGenerate} className="flex-grow flex flex-col sm:flex-row items-center gap-4">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <UploadIcon className="w-5 h-5" />
+              Upload
+            </button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImageUpload}
+              className="hidden"
+              accept="image/jpeg,image/png,image/webp"
+              aria-label="Upload image file"
+            />
+            <input
+              type="text"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder={ssppDescription ? 'e.g., "Add a retro filter"' : 'Analyze image to enable editing'}
+              className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-800/50 disabled:cursor-not-allowed"
+              disabled={isLoading || isAnalyzing || !ssppDescription}
+              aria-label="Image editing prompt"
+            />
+            <button
+              type="submit"
+              disabled={isLoading || isAnalyzing || !ssppDescription || !prompt.trim()}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            >
+              <MagicIcon className="w-5 h-5"/>
+              {isLoading ? 'Generating...' : 'Generate'}
+            </button>
+          </form>
+          <div className="h-10 border-l border-gray-700 mx-2"></div>
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            onClick={handleStartExploration}
+            className="flex-shrink-0 flex flex-col items-center justify-center gap-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500"
+            title="Enter Explorer Mode"
+            aria-label="Enter Explorer Mode"
           >
-            <UploadIcon className="w-5 h-5" />
-            Upload Image
+            <GitBranchIcon className="w-5 h-5 text-purple-400" />
+            <span className="text-xs">Explorer</span>
           </button>
-          <input
-            type="text"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={ssppDescription ? 'e.g., "Add a retro filter"' : 'Analyze image to enable editing'}
-            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-800/50 disabled:cursor-not-allowed"
-            disabled={isLoading || isAnalyzing || !ssppDescription}
-            aria-label="Image editing prompt"
-          />
-          <button
-            type="submit"
-            disabled={isLoading || isAnalyzing || !ssppDescription || !prompt.trim()}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400"
-          >
-            <MagicIcon className="w-5 h-5"/>
-            {isLoading ? 'Generating...' : 'Generate'}
-          </button>
-        </form>
+        </div>
       </footer>
     </div>
   );

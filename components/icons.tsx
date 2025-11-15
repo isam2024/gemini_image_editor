@@ -62,3 +62,31 @@ export const ChevronDownIcon: React.FC<{ className?: string }> = ({ className })
 export const InfoIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path></svg>
 );
+
+export const SparklesIcon: React.FC<{className?: string}> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 3l1.94 4.06L18 9l-4.06 1.94L12 15l-1.94-4.06L6 9l4.06-1.94zM12 21l-1.45-3.03L7.5 16l3.03-1.45L12 11.5l1.45 3.03L16.5 16l-3.03 1.45z"/>
+    </svg>
+);
+
+export const GitBranchIcon: React.FC<{className?: string}> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M10 5c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2zm-5 3c-1.1 0-2 .9-2 2v6c0 1.1.9 2 2 2s2-.9 2-2v-2h3v2c0 1.1.9 2 2 2s2-.9 2-2v-6c0-1.1-.9-2-2-2H7v-2c0-1.1-.9-2-2-2s-2 .9-2 2v2H2c-1.1 0-2 .9-2 2s.9 2 2 2h1v3H2c-1.1 0-2 .9-2 2s.9 2 2 2h3v-2c0-1.1.9-2 2-2s2 .9 2 2v2h2c1.1 0 2-.9 2-2s-.9-2-2-2h-3V9H5zm14 2c-1.1 0-2 .9-2 2v6c0 1.1.9 2 2 2s2-.9 2-2v-6c0-1.1-.9-2-2-2z"/>
+    </svg>
+);
+
+export const SaveIcon: React.FC<{className?: string}> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"></path></svg>
+);
+
+export const CheckboxUncheckedIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+    </svg>
+);
+
+export const CheckboxCheckedIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+    </svg>
+);
